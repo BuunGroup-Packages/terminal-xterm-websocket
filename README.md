@@ -1,73 +1,134 @@
-# React + TypeScript + Vite
+# Browser Terminal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A fully functional terminal emulator running in your browser, built with **xterm.js**, **WebSocket**, and **node-pty**.
 
-Currently, two official plugins are available:
+![Terminal Demo](https://buungroup.com/og-image.png)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
 
-## React Compiler
+- Real terminal emulation with xterm.js
+- WebSocket connection to backend shell
+- Automatic reconnection with exponential backoff
+- Resize handling
+- Docker support for the backend
+- WSL2 compatible
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Tutorial
 
-## Expanding the ESLint configuration
+This is the companion repository for the Buun Group tutorial:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+**[Build a Browser Terminal with xterm.js and WebSocket](https://buungroup.com/blog/browser-terminal-xterm-websocket-tutorial-2026)**
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+The tutorial covers:
+- Setting up xterm.js with React
+- Building a WebSocket + node-pty backend
+- Handling reconnection logic
+- Docker deployment
+- Security considerations
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Quick Start
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Prerequisites
+
+- Node.js 20+
+- Docker (for backend)
+
+### 1. Install Dependencies
+
+```bash
+# Frontend
+npm install
+
+# Backend
+cd server && npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 2. Start the Backend (Docker)
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+docker compose up -d --build
 ```
+
+### 3. Start the Frontend
+
+```bash
+npm run dev
+```
+
+### 4. Open Browser
+
+Navigate to [http://localhost:5173](http://localhost:5173)
+
+## Project Structure
+
+```
+terminal-app/
+├── src/
+│   ├── components/
+│   │   └── Terminal.tsx      # xterm.js React component
+│   ├── hooks/
+│   │   └── useWebSocket.ts   # WebSocket with auto-reconnect
+│   ├── styles/
+│   │   └── terminal.css      # Terminal styling
+│   ├── App.tsx
+│   └── main.tsx
+├── server/
+│   ├── index.ts              # WebSocket + node-pty server
+│   ├── Dockerfile
+│   └── package.json
+├── docker-compose.yml
+└── package.json
+```
+
+## Configuration
+
+### Environment Variables
+
+Create a `.env` file:
+
+```bash
+# WebSocket URL (default: ws://localhost:3001)
+VITE_WS_URL=ws://localhost:3001
+```
+
+### WSL2 Users
+
+If running on WSL2 with native Docker (not Docker Desktop), you may need to use your WSL2 IP:
+
+```bash
+# Get WSL2 IP
+hostname -I | awk '{print $1}'
+
+# Update .env
+VITE_WS_URL=ws://YOUR_WSL2_IP:3001
+```
+
+## Docker Commands
+
+```bash
+# Start backend
+docker compose up -d --build
+
+# View logs
+docker compose logs -f backend
+
+# Stop
+docker compose down
+
+# Full cleanup
+docker compose down --rmi all -v
+```
+
+## Tech Stack
+
+- **Frontend:** React, TypeScript, Vite, xterm.js
+- **Backend:** Node.js, WebSocket (ws), node-pty
+- **Container:** Docker, Alpine Linux
+
+## License
+
+MIT
+
+## Author
+
+[Buun Group](https://buungroup.com) - Brisbane, Australia
