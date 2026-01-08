@@ -1,0 +1,11 @@
+services:
+  # Backend only - frontend runs locally with npm run dev
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
