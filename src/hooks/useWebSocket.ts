@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/refs */
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 export interface WebSocketOptions {
@@ -38,9 +38,15 @@ export function useWebSocket(
   const shouldReconnectRef = useRef(true);
   const mountedRef = useRef(false);
 
+  // Track if initial connection has been made (prevents URL change effect from firing on mount)
+  const hasConnectedRef = useRef(false);
+  // Track if we're currently connecting (prevents duplicate connections)
+  const isConnectingRef = useRef(false);
+
   // Store latest values in refs
   const urlRef = useRef(url);
   const optionsRef = useRef(options);
+  const previousUrlRef = useRef(url);
 
   // Update refs when values change
   useEffect(() => {
@@ -63,6 +69,14 @@ export function useWebSocket(
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
 
+    // Prevent duplicate connections
+    if (isConnectingRef.current) {
+      console.log('[useWebSocket] Already connecting, skipping');
+      return;
+    }
+
+    isConnectingRef.current = true;
+
     // Clean up existing connection
     if (wsRef.current) {
       wsRef.current.onopen = null;
@@ -78,6 +92,8 @@ export function useWebSocket(
       reconnectTimeoutRef.current = null;
     }
 
+    console.log('[useWebSocket] Connecting to:', urlRef.current.split('?')[0] + '?token=***');
+
     const ws = new WebSocket(urlRef.current);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
@@ -85,6 +101,9 @@ export function useWebSocket(
 
     ws.onopen = () => {
       if (!mountedRef.current) return;
+      console.log('[useWebSocket] Connected');
+      isConnectingRef.current = false;
+      hasConnectedRef.current = true;
       setIsConnected(true);
       setIsReconnecting(false);
       reconnectAttemptsRef.current = 0;
@@ -100,6 +119,8 @@ export function useWebSocket(
     ws.onclose = (event) => {
       if (!mountedRef.current) return;
 
+      console.log('[useWebSocket] Closed, code:', event.code);
+      isConnectingRef.current = false;
       setIsConnected(false);
       setWsInstance(null);
 
@@ -110,8 +131,17 @@ export function useWebSocket(
 
       const { maxRetries = 10 } = optionsRef.current;
 
+      // Don't auto-reconnect on certain close codes (e.g., auth failures)
+      const noReconnectCodes = [4000, 4001, 4002, 4003];
+      if (noReconnectCodes.includes(event.code)) {
+        console.log('[useWebSocket] Not reconnecting due to close code:', event.code);
+        setIsReconnecting(false);
+        return;
+      }
+
       if (shouldReconnectRef.current && reconnectAttemptsRef.current < maxRetries) {
         const delay = getReconnectDelay(reconnectAttemptsRef.current);
+        console.log(`[useWebSocket] Reconnecting in ${Math.round(delay)}ms (attempt ${reconnectAttemptsRef.current + 1}/${maxRetries})`);
         setIsReconnecting(true);
         reconnectAttemptsRef.current++;
         setReconnectAttempt(reconnectAttemptsRef.current);
@@ -123,6 +153,7 @@ export function useWebSocket(
           }
         }, delay);
       } else if (reconnectAttemptsRef.current >= maxRetries) {
+        console.log('[useWebSocket] Max retries reached');
         setIsReconnecting(false);
         optionsRef.current.onMaxRetriesReached?.();
       }
@@ -130,6 +161,8 @@ export function useWebSocket(
 
     ws.onerror = (event) => {
       if (!mountedRef.current) return;
+      console.log('[useWebSocket] Error');
+      isConnectingRef.current = false;
       optionsRef.current.onError?.(event);
     };
   }, [getReconnectDelay]);
@@ -144,11 +177,13 @@ export function useWebSocket(
     shouldReconnectRef.current = true;
     reconnectAttemptsRef.current = 0;
     setReconnectAttempt(0);
+    isConnectingRef.current = false; // Reset connecting flag
     connect();
   }, [connect]);
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
+    isConnectingRef.current = false;
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -173,18 +208,16 @@ export function useWebSocket(
   useEffect(() => {
     mountedRef.current = true;
     shouldReconnectRef.current = true;
+    hasConnectedRef.current = false;
+    isConnectingRef.current = false;
 
-    // Small delay to ensure component is fully mounted (helps with StrictMode)
-    const initTimeout = setTimeout(() => {
-      if (mountedRef.current) {
-        connectFnRef.current();
-      }
-    }, 50);
+    // Connect immediately (no delay needed)
+    connectFnRef.current();
 
     return () => {
       mountedRef.current = false;
       shouldReconnectRef.current = false;
-      clearTimeout(initTimeout);
+      isConnectingRef.current = false;
 
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -200,6 +233,26 @@ export function useWebSocket(
       }
     };
   }, []); // Empty deps - only run on mount
+
+  // Reconnect when URL changes (e.g., token refresh)
+  // Only triggers AFTER initial connection has been made
+  useEffect(() => {
+    // Always update previousUrlRef
+    const urlChanged = previousUrlRef.current !== url;
+    previousUrlRef.current = url;
+
+    // Only reconnect if:
+    // 1. URL actually changed
+    // 2. We've already made the initial connection
+    // 3. Component is still mounted
+    if (urlChanged && hasConnectedRef.current && mountedRef.current) {
+      console.log('[useWebSocket] URL changed, reconnecting with new token');
+      reconnectAttemptsRef.current = 0;
+      setReconnectAttempt(0);
+      isConnectingRef.current = false; // Reset to allow new connection
+      connectFnRef.current();
+    }
+  }, [url]);
 
   return {
     ws: wsInstance,

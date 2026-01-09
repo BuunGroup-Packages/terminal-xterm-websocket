@@ -3,105 +3,160 @@ import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { useWebSocket } from '../hooks/useWebSocket';
+import type { TerminalTheme } from '../config/themes';
+import type { TerminalSettings } from '../hooks/useTerminalSettings';
 import 'xterm/css/xterm.css';
 
 interface TerminalProps {
   wsUrl: string;
+  theme: TerminalTheme;
+  settings: TerminalSettings;
   onConnectionChange?: (connected: boolean) => void;
   onReconnecting?: (attempt: number, maxAttempts: number) => void;
+  onServerMessage?: (msg: { type: string; [key: string]: unknown }) => void;
+  onWebSocketRef?: (ws: WebSocket | null) => void;
 }
 
-export function Terminal({ wsUrl, onConnectionChange, onReconnecting }: TerminalProps) {
+export function Terminal({
+  wsUrl,
+  theme,
+  settings,
+  onConnectionChange,
+  onReconnecting,
+  onServerMessage,
+  onWebSocketRef,
+}: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const isDisposedRef = useRef(false);
+
+  // Safe terminal write - checks if terminal exists and is not disposed
+  const safeWrite = useCallback((text: string) => {
+    const term = xtermRef.current;
+    if (term && !isDisposedRef.current) {
+      try {
+        term.write(text);
+      } catch (e) {
+        console.warn('[Terminal] Write failed:', e);
+      }
+    }
+  }, []);
+
+  const safeWriteln = useCallback((text: string) => {
+    const term = xtermRef.current;
+    if (term && !isDisposedRef.current) {
+      try {
+        term.writeln(text);
+      } catch (e) {
+        console.warn('[Terminal] Writeln failed:', e);
+      }
+    }
+  }, []);
+
+  const safeClear = useCallback(() => {
+    const term = xtermRef.current;
+    if (term && !isDisposedRef.current) {
+      try {
+        term.clear();
+      } catch (e) {
+        console.warn('[Terminal] Clear failed:', e);
+      }
+    }
+  }, []);
 
   // WebSocket with automatic reconnection
-  const {
-    isConnected,
-    isReconnecting,
-    send,
-    reconnect,
-  } = useWebSocket(wsUrl, {
-    maxRetries: 10,
-    baseDelay: 1000,
-    maxDelay: 30000,
-    onOpen: () => {
-      const term = xtermRef.current;
-      if (term) {
-        term.clear();
-        term.writeln('\x1b[32mConnected to terminal server\x1b[0m');
-        term.writeln('');
+  const { ws, isConnected, isReconnecting, send, reconnect } =
+    useWebSocket(wsUrl, {
+      maxRetries: 10,
+      baseDelay: 1000,
+      maxDelay: 30000,
+      onOpen: () => {
+        safeClear();
+        safeWriteln('\x1b[32mConnected to terminal server\x1b[0m');
+        safeWriteln('');
 
         // Send initial terminal size
-        const { cols, rows } = term;
-        send(JSON.stringify({ type: 'resize', cols, rows }));
-      }
-      onConnectionChange?.(true);
-    },
-    onMessage: (event) => {
-      const term = xtermRef.current;
-      if (!term) return;
-
-      if (event.data instanceof ArrayBuffer) {
-        const text = new TextDecoder().decode(event.data);
-        term.write(text);
-      } else {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'output') {
-            term.write(msg.data);
+        const term = xtermRef.current;
+        if (term && !isDisposedRef.current) {
+          try {
+            const { cols, rows } = term;
+            send(JSON.stringify({ type: 'resize', cols, rows }));
+          } catch (e) {
+            console.warn('[Terminal] Failed to send resize:', e);
           }
-        } catch {
-          term.write(event.data);
         }
-      }
-    },
-    onClose: () => {
-      const term = xtermRef.current;
-      if (term) {
-        term.writeln('');
-        term.writeln('\x1b[31mConnection closed\x1b[0m');
-      }
-      onConnectionChange?.(false);
-    },
-    onReconnecting: (attempt, maxAttempts) => {
-      const term = xtermRef.current;
-      if (term) {
-        term.writeln(`\x1b[33mReconnecting... (attempt ${attempt}/${maxAttempts})\x1b[0m`);
-      }
-      onReconnecting?.(attempt, maxAttempts);
-    },
-    onMaxRetriesReached: () => {
-      const term = xtermRef.current;
-      if (term) {
-        term.writeln('\x1b[31mMax reconnection attempts reached. Click to retry.\x1b[0m');
-      }
-    },
-    onError: () => {
-      const term = xtermRef.current;
-      if (term) {
-        term.writeln('\x1b[31mConnection error\x1b[0m');
-      }
-    },
-  });
+        onConnectionChange?.(true);
+      },
+      onMessage: (event) => {
+        if (isDisposedRef.current) return;
+
+        if (event.data instanceof ArrayBuffer) {
+          const text = new TextDecoder().decode(event.data);
+          safeWrite(text);
+        } else {
+          try {
+            const msg = JSON.parse(event.data);
+            switch (msg.type) {
+              case 'output':
+                safeWrite(msg.data);
+                break;
+              case 'session_started':
+                safeWriteln(`\x1b[36mSession started: ${msg.sessionId}\x1b[0m`);
+                safeWriteln(`\x1b[36mExpires: ${new Date(msg.expiresAt).toLocaleTimeString()}\x1b[0m`);
+                safeWriteln('');
+                break;
+              case 'session_expired':
+                safeWriteln('');
+                safeWriteln(`\x1b[31mSession expired: ${msg.reason}\x1b[0m`);
+                onServerMessage?.(msg);
+                break;
+              default:
+                onServerMessage?.(msg);
+            }
+          } catch {
+            safeWrite(event.data);
+          }
+        }
+      },
+      onClose: () => {
+        safeWriteln('');
+        safeWriteln('\x1b[31mConnection closed\x1b[0m');
+        onConnectionChange?.(false);
+      },
+      onReconnecting: (attempt, maxAttempts) => {
+        safeWriteln(`\x1b[33mReconnecting... (attempt ${attempt}/${maxAttempts})\x1b[0m`);
+        onReconnecting?.(attempt, maxAttempts);
+      },
+      onMaxRetriesReached: () => {
+        safeWriteln('\x1b[31mMax reconnection attempts reached. Click to retry.\x1b[0m');
+      },
+      onError: () => {
+        safeWriteln('\x1b[31mConnection error\x1b[0m');
+      },
+    });
+
+  // Pass WebSocket ref to parent
+  useEffect(() => {
+    onWebSocketRef?.(ws);
+  }, [ws, onWebSocketRef]);
 
   // Initialize terminal
   useEffect(() => {
-    if (!terminalRef.current || xtermRef.current) return;
+    if (!terminalRef.current) return;
+
+    // Prevent re-initialization
+    if (xtermRef.current) return;
+
+    isDisposedRef.current = false;
 
     const term = new XTerm({
-      cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
-      theme: {
-        background: '#1a1b26',
-        foreground: '#c0caf5',
-        cursor: '#c0caf5',
-        cursorAccent: '#1a1b26',
-        selectionBackground: '#33467c',
-      },
+      cursorBlink: settings.cursorBlink,
+      fontSize: settings.fontSize,
+      fontFamily: settings.fontFamily,
+      theme: theme.colors,
+      allowProposedApi: true,
     });
 
     const fitAddon = new FitAddon();
@@ -111,27 +166,89 @@ export function Terminal({ wsUrl, onConnectionChange, onReconnecting }: Terminal
 
     term.open(terminalRef.current);
 
-    requestAnimationFrame(() => {
-      fitAddon.fit();
-    });
-
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    term.writeln('Connecting to terminal...');
-    setIsTerminalReady(true);
+    // Delay fit and ready state to ensure terminal is fully rendered
+    const readyTimeout = setTimeout(() => {
+      if (!isDisposedRef.current && fitAddonRef.current) {
+        try {
+          fitAddonRef.current.fit();
+        } catch (e) {
+          console.warn('[Terminal] Initial fit failed:', e);
+        }
+        setIsTerminalReady(true);
+
+        // Write initial message
+        try {
+          term.writeln('Connecting to terminal...');
+        } catch (e) {
+          console.warn('[Terminal] Initial write failed:', e);
+        }
+      }
+    }, 100);
 
     return () => {
+      clearTimeout(readyTimeout);
+      isDisposedRef.current = true;
       setIsTerminalReady(false);
-      term.dispose();
+
+      try {
+        term.dispose();
+      } catch (e) {
+        console.warn('[Terminal] Dispose failed:', e);
+      }
+
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, []);
+  }, []); // Only initialize once
+
+  // Update theme when it changes
+  useEffect(() => {
+    const term = xtermRef.current;
+    if (term && !isDisposedRef.current) {
+      try {
+        term.options.theme = theme.colors;
+      } catch (e) {
+        console.warn('[Terminal] Theme update failed:', e);
+      }
+    }
+  }, [theme]);
+
+  // Update settings when they change
+  useEffect(() => {
+    const term = xtermRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (term && !isDisposedRef.current) {
+      try {
+        term.options.fontSize = settings.fontSize;
+        term.options.fontFamily = settings.fontFamily;
+        term.options.cursorBlink = settings.cursorBlink;
+
+        // Refit after font size change
+        if (fitAddon) {
+          requestAnimationFrame(() => {
+            if (!isDisposedRef.current && fitAddon) {
+              try {
+                fitAddon.fit();
+                const { cols, rows } = term;
+                send(JSON.stringify({ type: 'resize', cols, rows }));
+              } catch (e) {
+                console.warn('[Terminal] Resize after settings change failed:', e);
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('[Terminal] Settings update failed:', e);
+      }
+    }
+  }, [settings.fontSize, settings.fontFamily, settings.cursorBlink, send]);
 
   // Send user input to server
   useEffect(() => {
-    if (!isTerminalReady) return;
+    if (!isTerminalReady || isDisposedRef.current) return;
 
     const term = xtermRef.current;
     if (!term) return;
@@ -141,25 +258,35 @@ export function Terminal({ wsUrl, onConnectionChange, onReconnecting }: Terminal
     });
 
     return () => {
-      inputDisposable.dispose();
+      try {
+        inputDisposable.dispose();
+      } catch (e) {
+        console.warn('[Terminal] Input disposable cleanup failed:', e);
+      }
     };
   }, [isTerminalReady, send]);
 
   // Handle terminal resize
   const handleResize = useCallback(() => {
+    if (isDisposedRef.current) return;
+
     const fitAddon = fitAddonRef.current;
     const term = xtermRef.current;
 
     if (!fitAddon || !term) return;
 
-    fitAddon.fit();
-    const { cols, rows } = term;
-    send(JSON.stringify({ type: 'resize', cols, rows }));
+    try {
+      fitAddon.fit();
+      const { cols, rows } = term;
+      send(JSON.stringify({ type: 'resize', cols, rows }));
+    } catch (e) {
+      console.warn('[Terminal] Resize failed:', e);
+    }
   }, [send]);
 
   // Resize observer
   useEffect(() => {
-    if (!isTerminalReady) return;
+    if (!isTerminalReady || isDisposedRef.current) return;
 
     const resizeObserver = new ResizeObserver(handleResize);
     if (terminalRef.current) {
@@ -183,7 +310,7 @@ export function Terminal({ wsUrl, onConnectionChange, onReconnecting }: Terminal
         width: '100%',
         height: '100%',
         minHeight: '400px',
-        backgroundColor: '#1a1b26',
+        backgroundColor: theme.colors.background,
         cursor: !isConnected && !isReconnecting ? 'pointer' : 'text',
       }}
     />

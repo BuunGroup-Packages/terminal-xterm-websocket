@@ -1,7 +1,7 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "",
+  "description": "Terminal session orchestrator",
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch index.ts",
@@ -13,11 +13,16 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "node-pty": "^1.1.0",
+    "dockerode": "^4.0.9",
+    "jsonwebtoken": "^9.0.3",
+    "uuid": "^13.0.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@types/dockerode": "^3.3.47",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.3",
+    "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

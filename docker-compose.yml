@@ -1,11 +1,20 @@
 services:
-  # Backend only - frontend runs locally with npm run dev
+  # Backend orchestrator - manages terminal session containers
   backend:
     build:
       context: ./server
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - SESSION_DURATION_MS=${SESSION_DURATION_MS:-300000}
+      - SESSION_IMAGE=terminal-session:latest
+      - SESSION_MEMORY_LIMIT=${SESSION_MEMORY_LIMIT:-256m}
+      - SESSION_CPU_LIMIT=${SESSION_CPU_LIMIT:-0.5}
+    volumes:
+      # Mount Docker socket to spawn/manage session containers
+      - /var/run/docker.sock:/var/run/docker.sock
     tty: true
     stdin_open: true
     restart: unless-stopped

@@ -1,0 +1,36 @@
+# Lightweight terminal session container
+# Each user session gets one of these containers
+FROM alpine:3.21
+
+# Install common terminal tools and shells
+RUN apk add --no-cache \
+    bash \
+    zsh \
+    coreutils \
+    curl \
+    git \
+    htop \
+    jq \
+    nano \
+    openssh-client \
+    procps \
+    vim \
+    wget
+
+# Create non-root user for sessions
+RUN addgroup -g 1000 -S terminal && \
+    adduser -S terminal -u 1000 -G terminal -h /home/terminal -s /bin/bash
+
+# Set up home directory
+WORKDIR /home/terminal
+
+# Create a welcome message
+RUN echo 'echo "Welcome to your terminal session!"' >> /home/terminal/.bashrc && \
+    echo 'echo "Session will expire based on your token."' >> /home/terminal/.bashrc && \
+    echo 'echo ""' >> /home/terminal/.bashrc
+
+# Switch to non-root user
+USER terminal
+
+# Default command - keep container running
+CMD ["sleep", "infinity"]
